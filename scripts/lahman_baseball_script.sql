@@ -80,43 +80,161 @@ USING (playerid)
 WHERE sch.schoolname iLIKE '%Vand%' 
 GROUP BY p.namefirst, p.namelast, sch.schoolname
 ORDER BY total_salary_earned DESC
---ANSWER:  David Price, $24,553,888.00
 
+--------------------------------------------
+
+SELECT
+	p.namefirst AS first_name,
+	p.namelast AS last_name,
+	CAST(s.total_salary :: numeric AS money) AS total_salary_earned
+FROM people p
+JOIN (
+	SELECT 
+		playerid
+		FROM collegeplaying cp
+		JOIN schools sch
+		USING (schoolid)
+		WHERE sch.schoolname ILIKE '%Vand%'
+) AS vandy_players
+ON p.playerid = vandy_players.playerid
+JOIN (
+	SELECT 
+	playerid,
+	SUM(salary) AS total_salary
+	FROM salaries
+	GROUP BY playerid
+) AS s
+ON p.playerid = s.playerid
+GROUP BY p.playerid, s.total_salary
+ORDER BY total_salary_earned DESC;
+--ANSWER:  David Price, $24,553,888.00
 
 -- 4. Using the fielding table, group players into three groups based on their position: label players with position 
 --	  OF as "Outfield", those with position "SS", "1B", "2B", and "3B" as "Infield", and those with position "P" or 
 --	  "C" as "Battery". Determine the number of putouts made by each of these three groups in 2016.
---NEED: playerid, 
+--NEED: 
 
+WITH position_lookup AS (
+	SELECT DISTINCT
+		pos,
+		CASE 						--group the specific positions into general categories
+			WHEN pos = 'OF' THEN 'Outfield'
+			WHEN pos = 'SS' THEN 'Infield'
+			WHEN pos = '1B' THEN 'Infield'
+			WHEN pos = '2B' THEN 'Infield'
+			WHEN pos = '3B' THEN 'Infield'
+			WHEN pos = 'P' THEN 'Battery'
+			WHEN pos = 'C' THEN 'Battery'
+			ELSE 'Other'
+		END AS position_group
+	FROM fielding 
+)
 SELECT 
-	playerid,
-	CASE WHEN pos = 'OF' THEN 'Outfield'
-	WHEN pos = 'SS' THEN 'Infield'
-	WHEN pos = '1B' THEN 'Infield'
-	WHEN pos = '2B' THEN 'Infield'
-	WHEN pos = '3B' THEN 'Infield'
-	WHEN pos = 'P' THEN 'Battery'
-	WHEN pos = 'C' THEN 'Battery'
-	ELSE 'Unknown'
-	END AS field_position
-FROM fielding
-LIMIT 25
+	p1.position_group,
+	SUM(f.po) AS total_putouts		--select the position categories and the sum of putouts
+FROM fielding f
+INNER JOIN position_lookup p1				--join to the CTE
+USING (pos)
+WHERE f.yearid = 2016				--filter for year
+GROUP BY p1.position_group
+ORDER BY total_putouts DESC;
+--ANSWER: Outfield 810,809,040
+--		  Infield  785,600,481
+--		  Battery  540,825,390
 
-------------------------
+----------------------------------
 
-SELECT *
+SELECT
+	CASE							--group positions into categories
+		WHEN pos = 'OF' THEN 'Outfield'
+			WHEN pos = 'SS' THEN 'Infield'
+			WHEN pos = '1B' THEN 'Infield'
+			WHEN pos = '2B' THEN 'Infield'
+			WHEN pos = '3B' THEN 'Infield'
+			WHEN pos = 'P' THEN 'Battery'
+			WHEN pos = 'C' THEN 'Battery'
+			ELSE 'Other'
+		END AS position_group,
+	SUM(po) AS total_put_outs		--Sum the put outs
+FROM fielding 
+WHERE yearid = 2016					--filter for year
+GROUP BY position_group
+ORDER BY total_put_outs DESC;
+--ANSWER: Infield  58,934
+--		  Outfield 41,424
+--		  Battery  29,560
+----------------------------------
+
+SELECT pos, COUNT(pos)
 FROM fielding
-LIMIT 25
+GROUP BY pos
 
 
 -- 5. Find the average number of strikeouts per game by decade since 1920. Round the numbers you report to 2 decimal 
 --	  places. Do the same for home runs per game. Do you see any trends?
-   
+--NEED: SUM(so)/games, games by decade, SUM(hr)/games
+--teams table
+--sum of strikeout divided by games
+
+SELECT
+	yearid/10*10 AS decade,
+	ROUND(SUM(so) :: numeric/SUM(g) :: numeric, 2) AS so_per_game,
+	ROUND(SUM(hr) :: numeric/SUM(g) :: numeric, 2) AS hr_per_game
+FROM teams
+WHERE yearid >= 1920
+GROUP BY decade
+ORDER BY decade;
+--TREND: Big hitters in 2000s?
+
 
 -- 6. Find the player who had the most success stealing bases in 2016, where __success__ is measured as the percentage 
 --	  of stolen base attempts which are successful. (A stolen base attempt results either in a stolen base or being 
 --    caught stealing.) Consider only players who attempted _at least_ 20 stolen bases.
-	
+--NEED: playerid, player name, sb/(sb+cs)*100 WHERE (sb+cs)>=20
+
+SELECT						--2. create a table with aggregates from the subquery table
+	p.namefirst AS first_name,
+	p.namelast AS last_name,
+	yearid,
+	total_sb,
+	total_cs,
+	sb_attempts,
+	ROUND((total_sb :: numeric / sb_attempts), 2) * 100 AS sb_percentage
+FROM (
+	SELECT					--1. create a table calculating sb_attempts
+		playerid,
+		yearid,
+		SUM(sb) AS total_sb,
+		SUM(cs) AS total_cs,
+		SUM(sb + cs) AS sb_attempts
+	FROM batting
+	WHERE yearid = 2016		--3. filter by year
+	GROUP BY playerid, yearid
+) AS sb_table
+JOIN people p
+USING (playerid)
+WHERE sb_attempts >= 20		--4. filter by attempts
+ORDER BY sb_percentage DESC;
+--ANSWER: Chris Owings 91%
+
+
+---
+SELECT *				--investigating data
+FROM batting 
+WHERE yearid = 2016
+
+--------------------
+SELECT 					--building the subquery
+	playerid,
+	yearid,
+	SUM (sb) AS total_sb,
+	SUM (cs) AS total_cs,
+	SUM(sb + cs) AS sb_attempts
+FROM batting
+WHERE yearid = 2016
+	AND (sb + cs) >= 20
+GROUP BY playerid, yearid, sb, cs
+
 
 -- 7.  From 1970 – 2016, what is the largest number of wins for a team that did not win the world series? What is the 
 --	   smallest number of wins for a team that did win the world series? Doing this will probably result in an unusually 
@@ -124,11 +242,45 @@ LIMIT 25
 --	   the problem year. How often from 1970 – 2016 was it the case that a team with the most wins also won the world 
 --	   series? What percentage of the time?
 
+WITH most_wins AS (
+	SELECT			--this is a two column table that is returning the max win count per year
+		yearid,
+		MAX(w) AS w
+	FROM teams
+	WHERE yearid >= 1970
+	GROUP BY yearid
+	ORDER BY yearid
+	),
+most_win_teams AS (
+	SELECT 			--limit teams to only the ones that have the highest win total per year
+		yearid,
+		name,
+		wswin
+	FROM teams
+	INNER JOIN most_wins
+	USING(yearid, w)
+)
+SELECT 
+	(SELECT COUNT(*)
+	 FROM most_win_teams
+	 WHERE wswin = 'N'
+	) * 100.0 /
+	(SELECT COUNT(*)
+	 FROM most_win_teams
+	);
+
+SELECT
+	yearid,
+	SUM(g)
+FROM teams
+GROUP BY 1
+ORDER BY 1
 
 -- 8. Using the attendance figures from the homegames table, find the teams and parks which had the top 5 average 
 --	  attendance per game in 2016 (where average attendance is defined as total attendance divided by number of games). 
 --	  Only consider parks where there were at least 10 games played. Report the park name, team name, and average 
 --	  attendance. Repeat for the lowest 5 average attendance.
+--NEED: SUM(attendance)/COUNT(games)
 
 
 -- 9. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the American 
