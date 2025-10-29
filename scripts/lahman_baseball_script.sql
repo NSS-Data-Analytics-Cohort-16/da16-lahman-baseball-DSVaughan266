@@ -109,6 +109,22 @@ GROUP BY p.playerid, s.total_salary
 ORDER BY total_salary_earned DESC;
 --ANSWER:  David Price, $24,553,888.00
 
+
+
+--------------------------------
+--Janvi
+SELECT
+	c.playerid,
+	c.schoolid,
+	SUM(s.salary)::NUMERIC::MONEY AS total_salary,
+	s.lgid AS league
+FROM collegeplaying c
+INNER JOIN salaries s USING (playerid)
+WHERE schoolid = 'vandy'
+GROUP BY c.playerid,
+	c.schoolid,
+	s.lgid
+ORDER BY total_salary DESC;
 -- 4. Using the fielding table, group players into three groups based on their position: label players with position 
 --	  OF as "Outfield", those with position "SS", "1B", "2B", and "3B" as "Infield", and those with position "P" or 
 --	  "C" as "Battery". Determine the number of putouts made by each of these three groups in 2016.
@@ -280,16 +296,135 @@ ORDER BY 1
 --	  attendance per game in 2016 (where average attendance is defined as total attendance divided by number of games). 
 --	  Only consider parks where there were at least 10 games played. Report the park name, team name, and average 
 --	  attendance. Repeat for the lowest 5 average attendance.
---NEED: SUM(attendance)/COUNT(games)
+--NEED: SUM(attendance)/COUNT(games), homegames.teams, parks.park_name
+--get teams data -- join -- get park data WHERE >= 10 games played
+--RANK 
+
+WITH home_attendance_2016 AS (			--CTE to aggregate avg_attendance
+	SELECT 
+		team, 
+		park,
+		year,
+		SUM(attendance) AS total_attendance, 
+		SUM(games) AS total_games,
+		ROUND(SUM(attendance) :: numeric / SUM(games), 2) AS avg_attendance
+	FROM homegames
+	WHERE year = 2016
+	GROUP BY team, park, year
+	HAVING SUM(games) >= 10				--Eliminate low game totals
+)
+SELECT 									--SELECT final display columns
+	p.park_name,
+	ha.total_attendance,
+	t.name,
+	ha.total_games,
+	ha.avg_attendance
+FROM home_attendance_2016 AS ha
+INNER JOIN teams t						--JOIN for team name using two keys to eliminate duplicates
+ON ha.team = t.teamid AND ha.year = t.yearid
+INNER JOIN parks p						--JOIN for park names
+ON ha.park = p.park
+GROUP BY t.name, p.park_name, ha.total_attendance, ha.total_games, ha.avg_attendance
+--ORDER BY ha.avg_attendance DESC
+ORDER BY ha.avg_attendance ASC
+LIMIT 5
+
+
+--------------------------
+--Investigate duplicate results
+SELECT franchid, name, teamid, teamidlahman45, park, attendance
+FROM teams
+ORDER BY attendance
+--WHERE yearid = 2016
+
+
+
+--Janvi
+SELECT 
+	--(SELECT park_name FROM parks),
+	p.park_name,
+	h.attendance,
+	t.name,
+	h.games,
+	h.attendance/ h.games AS attendance_per_game
+FROM homegames h
+INNER JOIN parks p ON p.park = h.park
+INNER JOIN teams t ON t.teamidlahman45 = h.team AND t.yearid = h.year
+WHERE h.year = 2016
+AND games >=10
+ORDER BY attendance_per_game DESC
+LIMIT 5
+
+
 
 
 -- 9. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the American 
 --	  League (AL)? Give their full name and the teams that they were managing when they won the award.
+--NEED: m.playerid, p.namefirst, p.namelast, t.
+
+WITH both_league_winners AS (
+	SELECT 
+		playerid
+	FROM awardsmanagers awm
+	JOIN people p
+	USING (playerid)
+	WHERE awardid = 'TSN Manager of the Year'
+		AND lgid IN ('AL', 'NL')
+	GROUP BY playerid
+	HAVING COUNT (DISTINCT lgid) = 2
+)
+SELECT 
+	p.namefirst || ' ' || p.namelast AS full_name
+JOIN people p
+ON awm.playerid = p.playerid
+
+
+
+
+	
+---------------------------------------------
+WITH both_league_winners AS (
+	SELECT
+		playerid
+	FROM awardsmanagers
+	WHERE awardid = 'TSN Manager of the Year'
+		AND lgid IN ('AL', 'NL')
+	GROUP BY playerid
+	HAVING COUNT(DISTINCT lgid) = 2
+	) -- there are only 2 people that fit this criteria.
+
+SELECT 
+ 	* 
+FROM awardsmanagers 
+WHERE awardid = 'TSN Manager of the Year' 
+ 	AND  lgid IN ('AL', 'NL')
+-- G-- 100 rows total --60 rows won in both
+
+
+---------------
+SELECT
+	namefirst || ' ' || namelast AS full_name,
+	yearid,
+	lgid,
+	name
+FROM people
+INNER JOIN both_league_winners
+	USING(playerid)
+INNER JOIN awardsmanagers
+	USING(playerid)
+INNER JOIN managers
+	USING(playerid, yearid, lgid)
+INNER JOIN teams
+	USING(teamid,yearid,lgid)
+WHERE awardid = 'TSN Manager of the Year'
+ORDER BY full_name, yearid;
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. Consider only players who have played 
 --	   in the league for at least 10 years, and who hit at least one home run in 2016. Report the players' first and 
 --	   last names and the number of home runs they hit in 2016.
 
+-----
+--Janvi query
 
 -- **Open-ended questions**
 
