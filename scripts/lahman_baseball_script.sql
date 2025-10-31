@@ -15,7 +15,8 @@
 SELECT 
 	MIN(yearid) AS first_year,
 	MAX(yearid) AS final_year
-FROM teams
+--FROM teams
+FROM appearances
 --ANSWER: 1871 to 2016
 
 
@@ -71,13 +72,14 @@ SELECT
 	sch.schoolname AS university,
 	CAST(SUM(sal.salary)::numeric AS money) AS total_salary_earned
 FROM people p
-LEFT JOIN collegeplaying
+LEFT JOIN collegeplaying c
 USING (playerid)
 LEFT JOIN schools sch
-USING (schoolid)
+USING (schoolid)								--at least one JOIN needs a second key to eliminate duplicates
 LEFT JOIN salaries sal
 USING (playerid)
-WHERE sch.schoolname iLIKE '%Vand%' 
+WHERE sch.schoolname iLIKE '%Vand%'
+	AND sal.salary IS NOT NULL
 GROUP BY p.namefirst, p.namelast, sch.schoolname
 ORDER BY total_salary_earned DESC
 
@@ -119,12 +121,18 @@ SELECT
 	SUM(s.salary)::NUMERIC::MONEY AS total_salary,
 	s.lgid AS league
 FROM collegeplaying c
-INNER JOIN salaries s USING (playerid)
-WHERE schoolid = 'vandy'
-GROUP BY c.playerid,
+INNER JOIN salaries s 
+	USING (playerid)
+WHERE schoolid = 'vandy'		--need WHERE subquery to get rid of duplicates
+GROUP BY 
+	c.playerid,
 	c.schoolid,
 	s.lgid
 ORDER BY total_salary DESC;
+
+-------------------------------
+	
+
 -- 4. Using the fielding table, group players into three groups based on their position: label players with position 
 --	  OF as "Outfield", those with position "SS", "1B", "2B", and "3B" as "Infield", and those with position "P" or 
 --	  "C" as "Battery". Determine the number of putouts made by each of these three groups in 2016.
@@ -154,9 +162,9 @@ USING (pos)
 WHERE f.yearid = 2016				--filter for year
 GROUP BY p1.position_group
 ORDER BY total_putouts DESC;
---ANSWER: Outfield 810,809,040
---		  Infield  785,600,481
---		  Battery  540,825,390
+--ANSWER: Outfield 29,560
+--		  Infield  58,934
+--		  Battery  41,424
 
 ----------------------------------
 
@@ -285,6 +293,8 @@ SELECT
 	 FROM most_win_teams
 	);
 
+
+-----------------------------
 SELECT
 	yearid,
 	SUM(g)
@@ -300,7 +310,38 @@ ORDER BY 1
 --get teams data -- join -- get park data WHERE >= 10 games played
 --RANK 
 
-WITH home_attendance_2016 AS (			--CTE to aggregate avg_attendance
+(WITH home_attendance_2016 AS (			--CTE to aggregate avg_attendance
+	SELECT 
+		team, 
+		park,
+		year,
+		SUM(attendance) AS total_attendance, 
+		SUM(games) AS total_games,
+		ROUND(SUM(attendance) :: numeric / SUM(games), 2) AS avg_attendance
+	FROM homegames
+	WHERE year = 2016
+	GROUP BY team, park, year
+	HAVING SUM(games) >= 10				--Eliminate low game totals
+)
+SELECT 									--SELECT final display columns
+	p.park_name,
+	ha.total_attendance,
+	t.name,
+	ha.total_games,
+	ha.avg_attendance
+FROM home_attendance_2016 AS ha
+INNER JOIN teams t						--JOIN for team name using two keys to eliminate duplicates
+ON ha.team = t.teamid AND ha.year = t.yearid
+INNER JOIN parks p						--JOIN for park names
+ON ha.park = p.park
+GROUP BY t.name, p.park_name, ha.total_attendance, ha.total_games, ha.avg_attendance
+ORDER BY ha.avg_attendance DESC
+--ORDER BY ha.avg_attendance ASC
+LIMIT 5)
+
+UNION
+
+(WITH home_attendance_2016 AS (			--CTE to aggregate avg_attendance
 	SELECT 
 		team, 
 		park,
@@ -327,7 +368,7 @@ ON ha.park = p.park
 GROUP BY t.name, p.park_name, ha.total_attendance, ha.total_games, ha.avg_attendance
 --ORDER BY ha.avg_attendance DESC
 ORDER BY ha.avg_attendance ASC
-LIMIT 5
+LIMIT 5)
 
 
 --------------------------
@@ -362,69 +403,94 @@ LIMIT 5
 --	  League (AL)? Give their full name and the teams that they were managing when they won the award.
 --NEED: m.playerid, p.namefirst, p.namelast, t.
 
-WITH both_league_winners AS (
+WITH both_league_winners AS (						--CTE to create a table containing only the restricted managers
 	SELECT 
 		playerid
 	FROM awardsmanagers awm
-	JOIN people p
-	USING (playerid)
 	WHERE awardid = 'TSN Manager of the Year'
-		AND lgid IN ('AL', 'NL')
+		AND lgid IN ('AL', 'NL')					--Restricts results to AL and NL (getting rid of other lgids)
 	GROUP BY playerid
-	HAVING COUNT (DISTINCT lgid) = 2
+	HAVING COUNT (DISTINCT lgid) = 2				--This returns only TSN Manager of the Year with 2 assciated lgid
 )
 SELECT 
-	p.namefirst || ' ' || p.namelast AS full_name
-JOIN people p
-ON awm.playerid = p.playerid
+	p.namefirst || ' ' || p.namelast AS full_name,	--Concatenate the names
+	t.name AS team_name,
+	awm.lgid,
+	awm.yearid
+FROM awardsmanagers awm
+JOIN both_league_winners AS blw
+	ON awm.playerid = blw.playerid
+JOIN people p										--JOIN people to get names
+	ON awm.playerid = p.playerid
+JOIN managers m										--JOIN managers to get a common reference for the team names
+	ON awm.playerid = m.playerid					--Multiple keys to avoid duplicates
+	AND awm.yearid = m.yearid
+	AND awm.lgid = m.lgid
+JOIN teams t 										--JOIN teams for team names
+	ON m.teamid = t.teamid 
+	AND m.yearid = t.yearid
+WHERE awm.awardid = 'TSN Manager of the Year'
+ORDER BY p.namelast, awm.yearid;
 
 
-
-
-	
 ---------------------------------------------
-WITH both_league_winners AS (
-	SELECT
-		playerid
-	FROM awardsmanagers
-	WHERE awardid = 'TSN Manager of the Year'
-		AND lgid IN ('AL', 'NL')
-	GROUP BY playerid
-	HAVING COUNT(DISTINCT lgid) = 2
-	) -- there are only 2 people that fit this criteria.
 
-SELECT 
- 	* 
-FROM awardsmanagers 
-WHERE awardid = 'TSN Manager of the Year' 
- 	AND  lgid IN ('AL', 'NL')
--- G-- 100 rows total --60 rows won in both
-
-
----------------
-SELECT
-	namefirst || ' ' || namelast AS full_name,
-	yearid,
-	lgid,
-	name
-FROM people
-INNER JOIN both_league_winners
-	USING(playerid)
-INNER JOIN awardsmanagers
-	USING(playerid)
-INNER JOIN managers
-	USING(playerid, yearid, lgid)
-INNER JOIN teams
-	USING(teamid,yearid,lgid)
-WHERE awardid = 'TSN Manager of the Year'
-ORDER BY full_name, yearid;
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. Consider only players who have played 
 --	   in the league for at least 10 years, and who hit at least one home run in 2016. Report the players' first and 
 --	   last names and the number of home runs they hit in 2016.
 
------
---Janvi query
+
+WITH hr_all AS(
+	SELECT							-- List of players who scored atleast 1 hr overall career
+		b.playerid,
+		CONCAT(p.namefirst, ' ', p.namelast) AS full_name,
+		SUM(b.hr)AS total_runs,
+		MIN(b.yearid) AS min_year,
+		MAX(b.yearid) AS max_year,
+		MAX(b.yearid) - MIN(b.yearid) AS years_played
+	FROM batting b
+	INNER JOIN people p USING (playerid)
+	--WHERE CONCAT(p.namefirst, ' ', p.namelast) = 'Justin Upton'
+	GROUP BY full_name, playerid
+),
+	year_hr AS(						--Max scores of all the seasons
+		SELECT
+			playerid,
+			MAX(season_hr) AS yearhr
+		FROM (
+			SELECT playerid,
+			yearid,
+			SUM(hr) AS season_hr
+			FROM batting
+			GROUP BY yearid, playerid
+		) 	AS season_runs
+			GROUP BY playerid
+),
+--SELECT * FROM year_hr
+	hr_2016 AS(						--Max scores of 2016
+		SELECT 
+			playerid,
+		   	SUM(hr) AS hr2016
+		FROM batting
+		WHERE yearid = 2016
+		GROUP BY playerid
+		HAVING SUM(hr)>0
+)
+SELECT
+	hr_all.full_name,
+	--hr_all.total_runs,
+	hr_2016.hr2016
+	--year_hr.yearhr
+FROM hr_all
+INNER JOIN hr_2016 
+	USING (playerid)
+INNER JOIN year_hr 
+	USING (playerid)
+WHERE  hr_2016.hr2016 > 0
+	AND hr_all.years_played >=10
+	AND hr_2016.hr2016 >= year_hr.yearhr;
+
 
 -- **Open-ended questions**
 
@@ -441,3 +507,4 @@ ORDER BY full_name, yearid;
 --	   are more effective. Investigate this claim and present evidence to either support or dispute this claim. First, 
 --	   determine just how rare left-handed pitchers are compared with right-handed pitchers. Are left-handed pitchers 
 --	   more likely to win the Cy Young Award? Are they more likely to make it into the hall of fame?
+
